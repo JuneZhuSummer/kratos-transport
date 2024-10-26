@@ -71,9 +71,15 @@ func WithChannelBufferSize(size int) ServerOption {
 	}
 }
 
-func WithPayloadType(payloadType PayloadType) ServerOption {
+func WithReadPayloadType(payloadType PayloadType) ServerOption {
 	return func(s *Server) {
-		s.payloadType = payloadType
+		s.readPayloadType = payloadType
+	}
+}
+
+func WithWritePayloadType(payloadType PayloadType) ServerOption {
+	return func(s *Server) {
+		s.writePayloadType = payloadType
 	}
 }
 

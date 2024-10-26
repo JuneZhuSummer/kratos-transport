@@ -60,7 +60,8 @@ type Server struct {
 	register   chan *Session
 	unregister chan *Session
 
-	payloadType PayloadType
+	readPayloadType  PayloadType
+	writePayloadType PayloadType
 }
 
 func NewServer(opts ...ServerOption) *Server {
@@ -83,7 +84,8 @@ func NewServer(opts ...ServerOption) *Server {
 		register:   make(chan *Session),
 		unregister: make(chan *Session),
 
-		payloadType: PayloadTypeBinary,
+		readPayloadType:  PayloadTypeText,
+		writePayloadType: PayloadTypeBinary,
 	}
 
 	srv.init(opts...)
@@ -149,7 +151,7 @@ func (s *Server) marshalMessage(messageType MessageType, message MessagePayload)
 	var err error
 	var buff []byte
 
-	switch s.payloadType {
+	switch s.writePayloadType {
 	case PayloadTypeBinary:
 		var msg BinaryMessage
 		msg.Type = messageType
@@ -191,7 +193,7 @@ func (s *Server) SendMessage(sessionId SessionID, messageType MessageType, messa
 		return
 	}
 
-	switch s.payloadType {
+	switch s.writePayloadType {
 	case PayloadTypeBinary:
 		buf, err := s.marshalMessage(messageType, message)
 		if err != nil {
@@ -231,7 +233,7 @@ func (s *Server) unmarshalMessage(buf []byte) (*HandlerData, MessagePayload, err
 	var handler *HandlerData
 	var payload MessagePayload
 
-	switch s.payloadType {
+	switch s.readPayloadType {
 	case PayloadTypeBinary:
 		var msg BinaryMessage
 		if err := msg.Unmarshal(buf); err != nil {

@@ -102,7 +102,7 @@ func (c *Session) writePump() {
 		select {
 		case msg := <-c.send:
 			var err error
-			switch c.server.payloadType {
+			switch c.server.writePayloadType {
 			case PayloadTypeBinary:
 				if err = c.sendBinaryMessage(msg); err != nil {
 					LogError("write binary message error: ", err)
@@ -151,7 +151,7 @@ func (c *Session) readPump() {
 			break
 
 		case ws.PingMessage:
-			if err = c.sendPongMessage(""); err != nil {
+			if err = c.sendPongMessage("pong"); err != nil {
 				LogError("write pong message error: ", err)
 				return
 			}
