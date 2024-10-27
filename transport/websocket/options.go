@@ -6,20 +6,6 @@ import (
 	"time"
 )
 
-type PayloadType uint8
-
-const (
-	PayloadTypeText = 1
-
-	PayloadTypeBinary = 2
-
-	PayloadTypeClose = 8
-
-	PayloadTypePing = 9
-
-	PayloadTypePong = 10
-)
-
 type ServerOption func(o *Server)
 
 func WithNetwork(network string) ServerOption {
