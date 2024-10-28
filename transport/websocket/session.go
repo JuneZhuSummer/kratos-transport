@@ -16,6 +16,7 @@ import (
 var channelBufSize = 1024
 
 type SessionID string
+
 type ConnectHandler func(SessionID, any)
 
 type ClientInfo struct {
@@ -127,7 +128,7 @@ func (s *Session) sendToClient() {
 				return
 			}
 			_ = s.wsConn.SetWriteDeadline(time.Now().Add(time.Second * 5))
-			if err := s.wsConn.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+			if err := s.wsConn.WriteMessage(s.server.writeMessageType, msg); err != nil {
 				s.log.Errorf("Service:Session:sendToClient s.wsConn.WriteMessage fail, err: %s, clientInfo: %+v", err, s.client)
 				s.cancel()
 				return

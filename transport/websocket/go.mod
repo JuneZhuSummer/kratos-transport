@@ -1,9 +1,9 @@
 module github.com/JuneZhuSummer/kratos-transport/transport/websocket
 
-go 1.23.2
+go 1.21
 
 require (
-	github.com/go-kratos/kratos/v2 v2.8.1
+	github.com/go-kratos/kratos/v2 v2.7.3
 	github.com/google/uuid v1.4.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/tidwall/gjson v1.18.0

@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"crypto/tls"
+	"github.com/go-kratos/kratos/v2/encoding"
 	"net"
 	"time"
 )
@@ -50,6 +51,12 @@ func WithListener(lis net.Listener) ServerOption {
 	}
 }
 
+func WithCodec(c string) ServerOption {
+	return func(s *Server) {
+		s.codec = encoding.GetCodec(c)
+	}
+}
+
 func WithMarshalFunc(f MarshalMessageFunc[any]) ServerOption {
 	return func(s *Server) {
 		s.marshalFunc = f
@@ -59,6 +66,12 @@ func WithMarshalFunc(f MarshalMessageFunc[any]) ServerOption {
 func WithUnmarshalFunc(f UnmarshalMessageFunc) ServerOption {
 	return func(s *Server) {
 		s.unmarshalFunc = f
+	}
+}
+
+func WithWriteMessageType(t int) ServerOption {
+	return func(s *Server) {
+		s.writeMessageType = t
 	}
 }
 

@@ -16,7 +16,10 @@ type User struct {
 }
 
 func connect(sessionID SessionID, a any) {
-	u := a.(User)
+	u, ok := a.(User)
+	if !ok {
+		return
+	}
 	if u.Uid != 0 {
 		//已登录
 		fmt.Printf("sign in:%s", sessionID)
@@ -46,6 +49,7 @@ func Sub(ctx context.Context, sessionId SessionID, req *Request) (reply *Reply, 
 		},
 	}
 	fmt.Printf("[%s] req: %v\nreply:%v", sessionId, req, reply)
+	testServer.Broadcast([]byte("hello world"))
 	return reply, err
 }
 
@@ -64,9 +68,11 @@ func TestServer(t *testing.T) {
 	RegisterServerMessageHandler(srv, "sub", Sub)
 	testServer = srv
 
-	if err := srv.Start(ctx); err != nil {
-		panic(err)
-	}
+	go func() {
+		if err := srv.Start(ctx); err != nil {
+			panic(err)
+		}
+	}()
 
 	defer func() {
 		if err := srv.Stop(ctx); err != nil {

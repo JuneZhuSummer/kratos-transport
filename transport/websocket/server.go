@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"github.com/go-kratos/kratos/v2/encoding"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/transport"
 	ws "github.com/gorilla/websocket"
@@ -18,27 +19,23 @@ import (
 )
 
 type MarshalMessageFunc[T any] func(reply T) (message []byte, err error)
-type UnmarshalMessageFunc func(messageType int, message []byte) (hbKey string)
+type UnmarshalMessageFunc func(messageType int, message []byte) (key string)
 
 func DefaultMarshalFunc[T any](reply T) (message []byte, err error) {
 	//默认json解析
-	marshal, err := json.Marshal(reply)
-	if err != nil {
-		return nil, err
-	}
-	return marshal, nil
+	return json.Marshal(reply)
 }
-func DefaultUnmarshalFunc(messageType int, message []byte) (hbKey string) {
+func DefaultUnmarshalFunc(messageType int, message []byte) (key string) {
+	//client发送的数据默认是text数据
 	if messageType != ws.TextMessage {
-		//client发送的数据默认是text数据
 		return ""
 	}
 	//client默认发送格式为: {"op": "operate"} eg. {"op": "subscribe", "args": [{"channel": "ch1", "foo": "bar"}]}
 	msg := string(message)
 
 	params := gjson.Parse(msg)
-	op := params.Get("op").String()
-	return op
+	key = params.Get("op").String()
+	return key
 }
 
 var (
@@ -61,7 +58,8 @@ type Server struct {
 
 	err error
 
-	mp *Map //map[messageType]*HB
+	mp    *Map //map[messageType]*HB
+	codec encoding.Codec
 
 	sessionMgr *SessionManager
 	register   chan *Session
@@ -69,6 +67,8 @@ type Server struct {
 
 	marshalFunc   MarshalMessageFunc[any]
 	unmarshalFunc UnmarshalMessageFunc
+
+	writeMessageType int
 
 	log *log.Helper
 }
@@ -92,17 +92,19 @@ func NewServer(opts ...ServerOption) *Server {
 			WriteBufferSize: 1024,
 			CheckOrigin:     func(r *http.Request) bool { return true },
 		},
-		network:       "tcp",
-		address:       ":0",
-		path:          "/",
-		timeout:       1 * time.Second,
-		mp:            NewMap(),
-		sessionMgr:    NewSessionManager(),
-		register:      make(chan *Session, 1),
-		unregister:    make(chan *Session, 1),
-		marshalFunc:   DefaultMarshalFunc[any],
-		unmarshalFunc: DefaultUnmarshalFunc,
-		log:           log.NewHelper(log.GetLogger(), log.WithMessageKey("Server")),
+		network:          "tcp",
+		address:          ":0",
+		path:             "/",
+		timeout:          1 * time.Second,
+		mp:               NewMap(),
+		codec:            encoding.GetCodec("json"),
+		sessionMgr:       NewSessionManager(),
+		register:         make(chan *Session, 1),
+		unregister:       make(chan *Session, 1),
+		marshalFunc:      DefaultMarshalFunc[any],
+		unmarshalFunc:    DefaultUnmarshalFunc,
+		writeMessageType: ws.BinaryMessage,
+		log:              log.NewHelper(log.GetLogger(), log.WithMessageKey("Server")),
 	}
 
 	srv.init(opts...)
@@ -112,21 +114,21 @@ func NewServer(opts ...ServerOption) *Server {
 	return srv
 }
 
-func (s *Server) RegisterMessageHandler(messageType string, handler Handler[any, any], binder Binder) {
+func (s *Server) RegisterMessageHandler(mark string, handler Handler[any, any], binder Binder) {
 	hb := &HB{
 		H: handler,
 		B: binder,
 	}
-	s.mp.Set(messageType, hb)
+	s.mp.Set(mark, hb)
 }
 
-func (s *Server) DeregisterMessageHandler(messageType string) {
-	delete(s.mp.m, messageType)
+func (s *Server) DeregisterMessageHandler(mark string) {
+	delete(s.mp.m, mark)
 }
 
-func RegisterServerMessageHandler[T, Z any](srv *Server, messageType string, handler Handler[*T, *Z]) {
+func RegisterServerMessageHandler[T, Z any](srv *Server, mark string, handler Handler[*T, *Z]) {
 	srv.RegisterMessageHandler(
-		messageType,
+		mark,
 		func(ctx context.Context, sessionId SessionID, req any) (reply any, err error) {
 			switch t := req.(type) {
 			case *T:
@@ -220,35 +222,57 @@ func (s *Server) Start(ctx context.Context) error {
 
 func (s *Server) Stop(ctx context.Context) error {
 	s.log.Info("ws server stopping")
+	close(s.register)
+	close(s.unregister)
 	return s.Shutdown(ctx)
 }
 
 func (s *Server) run() {
 	for {
 		select {
-		case client := <-s.register:
+		case client, ok := <-s.register:
+			if !ok {
+				return
+			}
 			s.sessionMgr.Add(client)
-		case client := <-s.unregister:
+		case client, ok := <-s.unregister:
+			if !ok {
+				return
+			}
 			s.sessionMgr.Remove(client)
 		}
 	}
 }
 
+func (s *Server) unmarshal(inputData []byte, outValue any) error {
+	if s.codec != nil {
+		if err := s.codec.Unmarshal(inputData, outValue); err != nil {
+			return err
+		}
+	} else if outValue == nil {
+		outValue = inputData
+	}
+	return nil
+}
+
 func (s *Server) messageHandle(ctx context.Context, sessionId SessionID, messageType int, msg []byte) error {
-	hbKey := s.unmarshalFunc(messageType, msg)
-	if len(hbKey) == 0 {
+	key := s.unmarshalFunc(messageType, msg)
+	if len(key) == 0 {
 		//获取key失败,不再往下走
-		s.log.Debugf("messageType:%d, msg:%s", messageType, string(msg))
-		return errors.New("parse hbKey fail")
+		//s.log.Debugf("messageType:%d, msg:%s", messageType, string(msg))
+		return errors.New("parse key fail")
 	}
 
-	hb, ok := s.mp.Get(hbKey)
+	hb, ok := s.mp.Get(key)
 	if !ok {
 		return errors.New("unknown msgType")
 	}
 
 	req := hb.B()
-	_ = json.Unmarshal(msg, &req) //默认使用json解析
+	err := s.unmarshal(msg, &req)
+	if err != nil {
+		return err
+	}
 
 	reply, err := hb.H(ctx, sessionId, req)
 	if err != nil {
@@ -265,7 +289,7 @@ func (s *Server) messageHandle(ctx context.Context, sessionId SessionID, message
 		return err
 	}
 
-	s.log.Debugf("message:%v", string(message))
+	//s.log.Debugf("message:%v", string(message))
 
 	//推送响应数据
 	session.pushToChan(message)
