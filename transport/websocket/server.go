@@ -70,6 +70,8 @@ type Server struct {
 
 	writeMessageType int
 
+	autoReply bool
+
 	log *log.Helper
 }
 
@@ -104,6 +106,7 @@ func NewServer(opts ...ServerOption) *Server {
 		marshalFunc:      DefaultMarshalFunc[any],
 		unmarshalFunc:    DefaultUnmarshalFunc,
 		writeMessageType: ws.BinaryMessage,
+		autoReply:        true,
 		log:              log.NewHelper(log.GetLogger(), log.WithMessageKey("Server")),
 	}
 
@@ -279,20 +282,22 @@ func (s *Server) messageHandle(ctx context.Context, sessionId SessionID, message
 		return err
 	}
 
-	session, ok := s.sessionMgr.Get(sessionId)
-	if !ok {
-		return errors.New("invalid sessionId")
+	//自动推送响应数据
+	if s.autoReply {
+		session, ok2 := s.sessionMgr.Get(sessionId)
+		if !ok2 {
+			return errors.New("invalid sessionId")
+		}
+
+		message, err2 := s.marshalFunc(reply)
+		if err2 != nil {
+			return err2
+		}
+
+		//s.log.Debugf("message:%v", string(message))
+
+		session.pushToChan(message)
 	}
-
-	message, err := s.marshalFunc(reply)
-	if err != nil {
-		return err
-	}
-
-	//s.log.Debugf("message:%v", string(message))
-
-	//推送响应数据
-	session.pushToChan(message)
 
 	return nil
 }

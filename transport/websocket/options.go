@@ -75,6 +75,12 @@ func WithWriteMessageType(t int) ServerOption {
 	}
 }
 
+func WithAutoReply(autoReply bool) ServerOption {
+	return func(s *Server) {
+		s.autoReply = autoReply
+	}
+}
+
 func WithSessionChannelBufferSize(size int) ServerOption {
 	return func(_ *Server) {
 		channelBufSize = size
