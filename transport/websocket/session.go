@@ -4,13 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/go-kratos/kratos/v2/log"
-	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
+
+	"github.com/JuneZhuSummer/kratos-transport/transport/websocket/redis/ps_dispatcher"
+	"github.com/go-redis/redis/v8"
+
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-kratos/kratos/v2/log"
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+)
+
+const (
+	DispatcherPoolPublic  = "public"
+	DispatcherPoolPrivate = "private"
 )
 
 var channelBufSize = 1024
@@ -19,11 +29,19 @@ type SessionID string
 
 type ConnectHandler func(SessionID, any)
 
+var PrivateHandler func(msg *redis.Message) ([]byte, error)
+
+func SetPrivateHandler(f func(msg *redis.Message) ([]byte, error)) {
+	PrivateHandler = f
+}
+
 type ClientInfo struct {
 	ID     SessionID
 	IP     string
 	UA     string
 	Origin string
+	IsAuth bool
+	Token  string
 }
 
 type Session struct {
@@ -36,6 +54,9 @@ type Session struct {
 	server *Server
 
 	pushChan chan []byte
+
+	pubDispatcher *ps_dispatcher.MultiChannelDispatcher
+	priDispatcher *ps_dispatcher.MultiChannelDispatcher
 
 	lastSendTime int64
 
@@ -56,13 +77,29 @@ func NewSession(wsConn *websocket.Conn, r *http.Request, server *Server) *Sessio
 			IP:     strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0],
 			UA:     r.Header.Get("User-Agent"),
 			Origin: r.Header.Get("Origin"),
+			IsAuth: false,
+			Token:  "",
 		},
-		wsConn:       wsConn,
-		server:       server,
-		pushChan:     make(chan []byte, channelBufSize),
-		lastSendTime: 0,
-		log:          log.NewHelper(log.GetLogger(), log.WithMessageKey("Session")),
+		wsConn:        wsConn,
+		server:        server,
+		pushChan:      make(chan []byte, channelBufSize),
+		pubDispatcher: &ps_dispatcher.MultiChannelDispatcher{},
+		priDispatcher: &ps_dispatcher.MultiChannelDispatcher{},
+		lastSendTime:  0,
+		log:           log.NewHelper(log.GetLogger(), log.WithMessageKey("Session")),
 	}
+
+	pubMdp, err := ps_dispatcher.GetMultiChannelDispatcherPool(DispatcherPoolPublic)
+	if err != nil {
+		panic(err)
+	}
+	session.pubDispatcher.Init(pubMdp)
+
+	priMdp, err := ps_dispatcher.GetMultiChannelDispatcherPool(DispatcherPoolPrivate)
+	if err != nil {
+		panic(err)
+	}
+	session.priDispatcher.Init(priMdp)
 
 	return session
 }
@@ -73,6 +110,27 @@ func (s *Session) Conn() *websocket.Conn {
 
 func (s *Session) SessionID() SessionID {
 	return s.client.ID
+}
+
+func (s *Session) PubDispatcher() *ps_dispatcher.MultiChannelDispatcher {
+	return s.pubDispatcher
+}
+
+func (s *Session) PriDispatcher() *ps_dispatcher.MultiChannelDispatcher {
+	return s.priDispatcher
+}
+
+func (s *Session) IsAuth() bool {
+	return s.client.IsAuth
+}
+
+func (s *Session) Client() *ClientInfo {
+	return s.client
+}
+
+func (s *Session) SetToken(token string) {
+	s.client.IsAuth = true
+	s.client.Token = token
 }
 
 // 读--转到messageHandler里处理
@@ -138,6 +196,43 @@ func (s *Session) sendToClient() {
 	}
 }
 
+// 主动推送
+func (s *Session) receiveMsg() {
+	go func() {
+		for {
+			select {
+			case <-s.ctx.Done():
+				s.pubDispatcher.Close()
+				return
+			case msg := <-s.pubDispatcher.Channel():
+				switch t := msg.(type) {
+				case *redis.Message:
+					s.pushToChan([]byte(t.Payload))
+				default:
+					continue
+				}
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			s.priDispatcher.Close()
+			return
+		case msg := <-s.priDispatcher.Channel():
+			switch t := msg.(type) {
+			case *redis.Message:
+				if b, err := PrivateHandler(t); err == nil {
+					s.pushToChan(b)
+				}
+			default:
+				continue
+			}
+		}
+	}
+}
+
 func (s *Session) pushToChan(msg []byte) {
 	if len(s.pushChan) > (channelBufSize - 50) {
 		//通道即将满，kill session
@@ -153,6 +248,7 @@ func (s *Session) pushToChan(msg []byte) {
 func (s *Session) Listen() {
 	go s.dealRequest()
 	go s.sendToClient()
+	go s.receiveMsg()
 }
 
 type SessionManager struct {

@@ -2,9 +2,10 @@ package websocket
 
 import (
 	"crypto/tls"
-	"github.com/go-kratos/kratos/v2/encoding"
 	"net"
 	"time"
+
+	"github.com/go-kratos/kratos/v2/encoding"
 )
 
 type ServerOption func(o *Server)

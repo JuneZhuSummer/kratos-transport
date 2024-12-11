@@ -5,17 +5,18 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
-	"github.com/go-kratos/kratos/v2/encoding"
-	"github.com/go-kratos/kratos/v2/log"
-	"github.com/go-kratos/kratos/v2/transport"
-	ws "github.com/gorilla/websocket"
-	"github.com/tidwall/gjson"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-kratos/kratos/v2/encoding"
+	"github.com/go-kratos/kratos/v2/log"
+	"github.com/go-kratos/kratos/v2/transport"
+	ws "github.com/gorilla/websocket"
+	"github.com/tidwall/gjson"
 )
 
 type MarshalMessageFunc[T any] func(reply T) (message []byte, err error)
@@ -300,6 +301,10 @@ func (s *Server) messageHandle(ctx context.Context, sessionId SessionID, message
 	}
 
 	return nil
+}
+
+func (s *Server) Session(sessionId SessionID) (*Session, bool) {
+	return s.sessionMgr.Get(sessionId)
 }
 
 // SendMessage 单发

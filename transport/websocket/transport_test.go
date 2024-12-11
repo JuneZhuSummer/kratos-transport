@@ -2,11 +2,12 @@ package websocket
 
 import (
 	"context"
-	"github.com/go-kratos/kratos/v2/transport"
 	"net/http"
 	"reflect"
 	"sort"
 	"testing"
+
+	"github.com/go-kratos/kratos/v2/transport"
 )
 
 func TestTransport_Kind(t *testing.T) {
